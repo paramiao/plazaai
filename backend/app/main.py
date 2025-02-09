@@ -16,15 +16,16 @@ from .services.ai_service import ai_service
 from .services.search_service import search_service
 from .config import settings
 from sqlalchemy import select
+from .api.chat import router as chat_router
 
 app = FastAPI(title="Personal Knowledge Assistant")
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:3000", "http://localhost"],  # 允许的前端域名
+    allow_origins=["*"],  # 允许所有来源
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"]
 )
@@ -38,10 +39,17 @@ async def startup_event():
     await init_db()
     logger.info("Database initialized successfully")
 
+# 包含 ChatGPT 兼容的路由
+app.include_router(chat_router)
+
+# 保留原有的路由用于兼容性
 class ChatRequest(BaseModel):
     message: str
     model: Optional[str] = None
     session_id: Optional[int] = None
+
+class SearchRequest(BaseModel):
+    query: str
 
 @app.get("/models")
 async def list_models():
@@ -145,4 +153,20 @@ async def get_session_messages(session_id: int, db: AsyncSession = Depends(get_d
         .order_by(Message.created_at)
     )
     messages = result.scalars().all()
-    return messages 
+    return messages
+
+@app.post("/search")
+async def search(request: SearchRequest):
+    """
+    Perform a web search using Search1API
+    """
+    logger.info(f"[Search] Received search request: {request}")
+    try:
+        results = await search_service.search(request.query)
+        return results
+    except Exception as e:
+        logger.error(f"[Search] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Search failed: {str(e)}"
+        ) 
